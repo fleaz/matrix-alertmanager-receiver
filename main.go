@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
+	html "html/template"
 	"log"
 	"net/http"
 	"os"
@@ -29,20 +31,16 @@ type Configuration struct {
 		Port    int    `toml:"port"`
 		Address string `toml:"address"`
 	} `toml:"http"`
+	General struct {
+		HTMLTemplate string `toml:"html_template"`
+	} `toml:"general"`
 }
 
-func getMatrixMessageFor(alert template.Alert) gomatrix.HTMLMessage {
-	var prefix string
-	switch alert.Status {
-	case "firing":
-		prefix = "<strong><font color=\"#ff0000\">FIRING</font></strong> "
-	case "resolved":
-		prefix = "<strong><font color=\"#33cc33\">RESOLVED</font></strong> "
-	default:
-		prefix = fmt.Sprintf("<strong>%v</strong> ", alert.Status)
-	}
-
-	return gomatrix.GetHTMLMessage("m.text", prefix+alert.Labels["name"]+" >> "+alert.Annotations["summary"])
+func renderHTMLMessage(alerts template.Data) gomatrix.HTMLMessage {
+	tpl, _ := html.New("html template").Parse(config.General.HTMLTemplate)
+	var buf bytes.Buffer
+	tpl.Execute(&buf, alerts)
+	return gomatrix.GetHTMLMessage("m.text", buf.String())
 }
 
 func getMatrixClient(homeserver string, user string, token string, targetRoomID string) *gomatrix.Client {
@@ -73,8 +71,7 @@ func getMatrixClient(homeserver string, user string, token string, targetRoomID 
 	return matrixClient
 }
 
-func handleIncomingHooks(w http.ResponseWriter, r *http.Request,
-	matrixClient *gomatrix.Client, targetRoomID string) {
+func handleIncomingHooks(w http.ResponseWriter, r *http.Request, matrixClient *gomatrix.Client, targetRoomID string) {
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -88,13 +85,11 @@ func handleIncomingHooks(w http.ResponseWriter, r *http.Request,
 
 	logger.Printf("Received valid hook from %v", r.RemoteAddr)
 
-	for _, alert := range payload.Alerts {
-		msg := getMatrixMessageFor(alert)
-		logger.Printf("> %v", msg.Body)
-		_, err := matrixClient.SendMessageEvent(targetRoomID, "m.room.message", msg)
-		if err != nil {
-			logger.Printf(">> Could not forward to Matrix: %v", err)
-		}
+	msg := renderHTMLMessage(payload)
+	logger.Printf("> %v", msg.Body)
+	_, err := matrixClient.SendMessageEvent(targetRoomID, "m.room.message", msg)
+	if err != nil {
+		logger.Printf(">> Could not forward to Matrix: %v", err)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -121,6 +116,12 @@ func main() {
 	// 		logger.Fatalf("Field %v is not set in config. Exiting.", field)
 	// 	}
 	// }
+
+	// validate that the html template is valid
+	_, err = html.New("html template").Parse(config.General.HTMLTemplate)
+	if err != nil {
+		logger.Fatalf("html template is invalid: %v", err)
+	}
 
 	// Initialize Matrix client.
 	matrixClient := getMatrixClient(

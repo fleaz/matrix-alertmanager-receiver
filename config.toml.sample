@@ -9,3 +9,25 @@ token = "secret"
 [http]
 port = 9088
 address = "127.0.0.1"
+
+[general]
+html_template = '''
+{{range .Alerts -}}
+    {{ $severity := index .Labels "severity" }}
+    {{ if eq .Status "firing" }}
+    {{ if eq $severity "critical"}}
+        <font color='red'><b>[FIRING - CRITICAL]</b></font>
+    {{ else if eq $severity "warning"}}
+        <font color='orange'><b>[FIRING - WARNING]</b></font>
+    {{ else }}
+        <b>[FIRING - {{ $severity }}]</b>
+    {{ end }}
+    {{ else }}
+    <font color='green'><b>[RESOLVED]</b></font>
+    {{ end }}
+    {{ index .Labels "alertname"}}: {{ index .Annotations "summary"}}
+    (
+    <a href="{{ .GeneratorURL }}">Prometheus</a>
+    )<br/>
+{{end -}}
+'''
