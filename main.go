@@ -1,12 +1,13 @@
 package main
 
 import (
-	"os"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
-	"flag"
 	"net/http"
-	"encoding/json"
+	"os"
+
 	"github.com/BurntSushi/toml"
 	"github.com/matrix-org/gomatrix"
 	"github.com/prometheus/alertmanager/template"
@@ -16,14 +17,18 @@ var logger *log.Logger
 var config Configuration
 
 type Configuration struct {
-	Homeserver string
-	TargetRoomID string
-
-	MXID string
-	MXToken string
-
-	HTTPPort int
-	HTTPAddress string
+	Matrix struct {
+		Homeserver string `toml:"homeserver"`
+		RoomID     string `toml:"room_id"`
+	} `toml:"matrix"`
+	User struct {
+		ID    string `toml:"id"`
+		Token string `toml:"token"`
+	} `toml:"user"`
+	HTTP struct {
+		Port    int    `toml:"port"`
+		Address string `toml:"address"`
+	} `toml:"http"`
 }
 
 func getMatrixMessageFor(alert template.Alert) gomatrix.HTMLMessage {
@@ -37,7 +42,7 @@ func getMatrixMessageFor(alert template.Alert) gomatrix.HTMLMessage {
 		prefix = fmt.Sprintf("<strong>%v</strong> ", alert.Status)
 	}
 
-	return gomatrix.GetHTMLMessage("m.text", prefix + alert.Labels["name"] + " >> " + alert.Annotations["summary"])
+	return gomatrix.GetHTMLMessage("m.text", prefix+alert.Labels["name"]+" >> "+alert.Annotations["summary"])
 }
 
 func getMatrixClient(homeserver string, user string, token string, targetRoomID string) *gomatrix.Client {
@@ -60,7 +65,7 @@ func getMatrixClient(homeserver string, user string, token string, targetRoomID 
 	}
 
 	if alreadyJoinedTarget {
-		logger.Printf("%v is already part of %v.", user, targetRoomID,)
+		logger.Printf("%v is already part of %v.", user, targetRoomID)
 	} else {
 		logger.Printf("Joining %v.", targetRoomID)
 		_, err := matrixClient.JoinRoom(targetRoomID, "", nil)
@@ -72,7 +77,7 @@ func getMatrixClient(homeserver string, user string, token string, targetRoomID 
 	return matrixClient
 }
 
-func handleIncomingHooks( w http.ResponseWriter, r *http.Request,
+func handleIncomingHooks(w http.ResponseWriter, r *http.Request,
 	matrixClient *gomatrix.Client, targetRoomID string) {
 
 	if r.Method != http.MethodPost {
@@ -109,27 +114,28 @@ func main() {
 	flag.Parse()
 
 	logger.Printf("Reading configuration from %v.", *configPath)
-	md, err := toml.DecodeFile(*configPath, &config)
+	_, err := toml.DecodeFile(*configPath, &config)
 	if err != nil {
 		logger.Fatalf("Could not parse configuration file (%v): %v", *configPath, err)
 	}
 
-	for _, field := range []string{"Homeserver", "MXID", "MXToken", "TargetRoomID", "HTTPPort"} {
-		if ! md.IsDefined(field) {
-			logger.Fatalf("Field %v is not set in config. Exiting.", field)
-		}
-	}
+	// TODO: Fix validation
+	// for _, field := range []string{"matrix.homeserver", "MXID", "MXToken", "TargetRoomID", "HTTPPort"} {
+	// 	if !md.IsDefined(field) {
+	// 		logger.Fatalf("Field %v is not set in config. Exiting.", field)
+	// 	}
+	// }
 
 	// Initialize Matrix client.
 	matrixClient := getMatrixClient(
-		config.Homeserver, config.MXID, config.MXToken, config.TargetRoomID)
+		config.Matrix.Homeserver, config.User.ID, config.User.Token, config.Matrix.RoomID)
 
 	// Initialize HTTP server.
 	http.HandleFunc("/alert", func(w http.ResponseWriter, r *http.Request) {
-		handleIncomingHooks(w, r, matrixClient, config.TargetRoomID)
+		handleIncomingHooks(w, r, matrixClient, config.Matrix.RoomID)
 	})
 
-	var listenAddr = fmt.Sprintf("%v:%v", config.HTTPAddress, config.HTTPPort)
+	var listenAddr = fmt.Sprintf("%v:%v", config.HTTP.Address, config.HTTP.Port)
 	logger.Printf("Listening for HTTP requests (webhooks) on %v", listenAddr)
 	logger.Fatal(http.ListenAndServe(listenAddr, nil))
 }
