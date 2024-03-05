@@ -57,21 +57,17 @@ func getMatrixClient(homeserver string, user string, token string, targetRoomID 
 		logger.Fatalf("Could not fetch Matrix rooms: %v", err)
 	}
 
-	alreadyJoinedTarget := false
 	for _, roomID := range joinedRooms.JoinedRooms {
 		if targetRoomID == roomID {
-			alreadyJoinedTarget = true
+			logger.Printf("%v is already part of %v.", user, targetRoomID)
+			return matrixClient
 		}
 	}
 
-	if alreadyJoinedTarget {
-		logger.Printf("%v is already part of %v.", user, targetRoomID)
-	} else {
-		logger.Printf("Joining %v.", targetRoomID)
-		_, err := matrixClient.JoinRoom(targetRoomID, "", nil)
-		if err != nil {
-			logger.Fatalf("Failed to join %v: %v", targetRoomID, err)
-		}
+	logger.Printf("Joining %v.", targetRoomID)
+	_, err = matrixClient.JoinRoom(targetRoomID, "", nil)
+	if err != nil {
+		logger.Fatalf("Failed to join %v: %v", targetRoomID, err)
 	}
 
 	return matrixClient
