@@ -103,6 +103,7 @@ func handleIncomingHooks(w http.ResponseWriter, r *http.Request, matrixClient *g
 	payload := template.Data{}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
+		return
 	}
 
 	logger.Printf("Received valid hook from %v", r.RemoteAddr)
