@@ -11,6 +11,7 @@ import (
 	"os"
 
 	"github.com/BurntSushi/toml"
+	"github.com/go-playground/validator/v10"
 	"github.com/matrix-org/gomatrix"
 	"github.com/prometheus/alertmanager/template"
 )
@@ -20,20 +21,41 @@ var config Configuration
 
 type Configuration struct {
 	Matrix struct {
-		Homeserver string `toml:"homeserver"`
-		RoomID     string `toml:"room_id"`
+		Homeserver string `toml:"homeserver" validate:"required,url"`
+		RoomID     string `toml:"room_id" validate:"required"`
 	} `toml:"matrix"`
 	User struct {
-		ID    string `toml:"id"`
-		Token string `toml:"token"`
+		ID    string `toml:"id" validate:"required"`
+		Token string `toml:"token" validate:"required"`
 	} `toml:"user"`
 	HTTP struct {
-		Port    int    `toml:"port"`
-		Address string `toml:"address"`
+		Port    int    `toml:"port" validate:"number"`
+		Address string `toml:"address" `
+		Path    string `toml:"path" `
 	} `toml:"http"`
 	General struct {
-		HTMLTemplate string `toml:"html_template"`
+		Debug        bool   `toml:"debug" validate:"boolean"`
+		HTMLTemplate string `toml:"html_template" validate:"go-template"`
 	} `toml:"general"`
+}
+
+func ValidateHTMLTemplate(fl validator.FieldLevel) bool {
+	_, err := html.New("html template").Parse(fl.Field().String())
+	return err == nil
+}
+
+func getDefaultConfig() Configuration {
+	c := Configuration{}
+	c.HTTP.Port = 9088
+	c.HTTP.Address = "localhost"
+	c.HTTP.Path = "/alert"
+	c.General.Debug = false
+	c.General.HTMLTemplate = `
+	{{range .Alerts -}}
+		[{{ .Status }}] {{ .Labels.instance }} - {{ index .Annotations "summary"}}<br/>
+	{{end -}}
+	`
+	return c
 }
 
 func renderHTMLMessage(alerts template.Data) gomatrix.HTMLMessage {
@@ -96,39 +118,40 @@ func handleIncomingHooks(w http.ResponseWriter, r *http.Request, matrixClient *g
 }
 
 func main() {
-	// Initialize logger.
+	// Initialize logger
 	logger = log.New(os.Stdout, "", log.Flags())
 
-	// We use a configuration file since we need to specify secrets, and read
-	// everything else from it to keep things simple.
 	var configPath = flag.String("config", "/etc/matrix-alertmanager-receiver.toml", "Path to configuration file")
 	flag.Parse()
 
 	logger.Printf("Reading configuration from %v.", *configPath)
+	config = getDefaultConfig()
 	_, err := toml.DecodeFile(*configPath, &config)
 	if err != nil {
 		logger.Fatalf("Could not parse configuration file (%v): %v", *configPath, err)
 	}
 
-	// TODO: Fix validation
-	// for _, field := range []string{"matrix.homeserver", "MXID", "MXToken", "TargetRoomID", "HTTPPort"} {
-	// 	if !md.IsDefined(field) {
-	// 		logger.Fatalf("Field %v is not set in config. Exiting.", field)
-	// 	}
-	// }
-
-	// validate that the html template is valid
-	_, err = html.New("html template").Parse(config.General.HTMLTemplate)
+	// Validate config file
+	validate := validator.New(validator.WithRequiredStructEnabled())
+	validate.RegisterValidation("go-template", ValidateHTMLTemplate)
+	err = validate.Struct(config)
 	if err != nil {
-		logger.Fatalf("html template is invalid: %v", err)
+		logger.Print("Found errors in the configuration file:")
+		for _, err := range err.(validator.ValidationErrors) {
+			if err.Tag() == "required" {
+				logger.Printf("%s is required", err.Namespace())
+			} else {
+				logger.Printf("%s failed validation: %s\n", err.Namespace(), err.Tag())
+			}
+		}
+		os.Exit(1)
 	}
 
-	// Initialize Matrix client.
-	matrixClient := getMatrixClient(
-		config.Matrix.Homeserver, config.User.ID, config.User.Token, config.Matrix.RoomID)
+	// Initialize Matrix client
+	matrixClient := getMatrixClient(config.Matrix.Homeserver, config.User.ID, config.User.Token, config.Matrix.RoomID)
 
-	// Initialize HTTP server.
-	http.HandleFunc("/alert", func(w http.ResponseWriter, r *http.Request) {
+	// Initialize HTTP server
+	http.HandleFunc(fmt.Sprintf("%s", config.HTTP.Path), func(w http.ResponseWriter, r *http.Request) {
 		handleIncomingHooks(w, r, matrixClient, config.Matrix.RoomID)
 	})
 
