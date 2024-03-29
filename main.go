@@ -102,17 +102,25 @@ func handleIncomingHooks(w http.ResponseWriter, r *http.Request, matrixClient *g
 
 	payload := template.Data{}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		logger.Printf("Received invalid request from %v", r.RemoteAddr)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	logger.Printf("Received valid hook from %v", r.RemoteAddr)
+	logger.Printf("Received valid request from %v", r.RemoteAddr)
+
+	if config.General.Debug {
+		logger.Printf("Payload: %+v\n", payload)
+	}
 
 	msg := renderHTMLMessage(payload)
-	logger.Printf("> %v", msg.Body)
+
+	if config.General.Debug {
+		logger.Printf("Message: %s\n", msg.Body)
+	}
 	_, err := matrixClient.SendMessageEvent(targetRoomID, "m.room.message", msg)
 	if err != nil {
-		logger.Printf(">> Could not forward to Matrix: %v", err)
+		logger.Printf("Could not post message to Matrix: %v", err)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -125,7 +133,7 @@ func main() {
 	var configPath = flag.String("config", "/etc/matrix-alertmanager-receiver.toml", "Path to configuration file")
 	flag.Parse()
 
-	logger.Printf("Reading configuration from %v.", *configPath)
+	logger.Printf("Reading configuration from %v", *configPath)
 	config = getDefaultConfig()
 	_, err := toml.DecodeFile(*configPath, &config)
 	if err != nil {
@@ -157,6 +165,6 @@ func main() {
 	})
 
 	var listenAddr = fmt.Sprintf("%v:%v", config.HTTP.Address, config.HTTP.Port)
-	logger.Printf("Listening for HTTP requests (webhooks) on %v", listenAddr)
+	logger.Printf("Listening on %v", listenAddr)
 	logger.Fatal(http.ListenAndServe(listenAddr, nil))
 }
