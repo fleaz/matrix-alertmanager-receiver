@@ -1,17 +1,19 @@
 [matrix]
-homeserver = "https://staging.matrix.ungleich.cloud"
-room_id = "!jHFKHemgIAaDJekoxN:matrix-staging.ungleich.ch"
+homeserver = "https://staging.matrix.ungleich.cloud"       # Required
+room_id = "!jHFKHemgIAaDJekoxN:matrix-staging.ungleich.ch" # Required
 
 [user]
-id = "@fnux:matrix-staging.ungleich.ch"
-token = "secret"
+id = "@fnux:matrix-staging.ungleich.ch" # Required
+token = "secret"                        # Required
 
 [http]
 port = 9088
 address = "127.0.0.1"
+path = "/alert"
 
 [general]
-html_template = '''
+debug = false
+html_template = '''   
 {{range .Alerts -}}
     {{ $severity := index .Labels "severity" }}
     {{ if eq .Status "firing" }}
